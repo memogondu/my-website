@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>지점 대기번호 시스템</title>
+<style>
+  body{font-family:sans-serif;background:#111;color:#eee;margin:0;min-height:100vh;}
+  .center-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;box-sizing:border-box;}
+  .wrap{max-width:380px;margin:0 auto;padding:20px;box-sizing:border-box;}
+  .card{background:#1c1c1c;border:1px solid #333;border-radius:12px;padding:32px;text-align:center;width:280px;}
+  .card.left{text-align:left;width:auto;}
+  .label{font-size:13px;color:#999;margin-bottom:10px;}
+  .number{font-size:64px;font-weight:bold;color:#4ade80;font-family:monospace;}
+  .unit{font-size:14px;color:#999;margin-top:6px;}
+  .updated{font-size:11px;color:#666;margin-top:20px;}
+  .staff-toggle{text-align:center;margin-top:18px;font-size:12px;color:#555;cursor:pointer;}
+  .staff-toggle:hover{color:#888;}
+  .refresh-icon{display:inline-block;margin-left:0;cursor:pointer;color:#4ade80;font-size:34px;user-select:none;}
+  .refresh-icon.spin{animation:spin .5s linear;}
+  @keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+  h1{font-size:16px;margin:0 0 16px;}
+  input[type=text], input[type=password]{width:100%;padding:10px;border-radius:8px;border:1px solid #444;background:#252525;color:#eee;font-size:15px;box-sizing:border-box;font-family:monospace;margin-bottom:8px;}
+  button{margin-top:6px;padding:10px 16px;border-radius:8px;border:none;font-weight:bold;cursor:pointer;font-family:sans-serif;}
+  .btn-green{background:#4ade80;color:#111;}
+  .btn-gray{background:#333;color:#eee;}
+  .error-text{color:#f87171;font-size:12px;margin-top:4px;}
+  .current-label{font-size:12px;color:#999;}
+  .current-number{font-size:40px;font-weight:bold;font-family:monospace;color:#4ade80;}
+  .empty{color:#666;font-size:14px;}
+  .result{margin-top:14px;padding:12px;border-radius:8px;background:#252525;font-size:14px;line-height:1.6;}
+  .stat-row{display:flex;justify-content:space-between;font-size:13px;color:#999;margin-top:10px;}
+  .desk-badge{font-size:12px;color:#999;margin-bottom:20px;}
+  .card-block{background:#1c1c1c;border:1px solid #333;border-radius:12px;padding:24px;margin-bottom:16px;}
+  .link-small{font-size:12px;color:#666;text-decoration:none;cursor:pointer;}
+</style>
+</head>
+<body>
+
+<!-- ================= 공개 대기현황 화면 (기본 진입 화면) ================= -->
+<div id="view-public" class="center-wrap">
+  <div>
+    <div class="card">
+      <div class="label">현재 대기 고객수</div>
+      <div class="number" id="waiting-num">-</div>
+      <div class="unit">명</div>
+      <div class="updated">
+        <span id="refresh-icon" class="refresh-icon" onclick="manualRefresh()">⟳</span>
+      </div>
+    </div>
+    <div class="staff-toggle" onclick="toggleStaffLogin()">직원 접속</div>
+
+    <div id="staff-login-inline" style="display:none;margin-top:14px;">
+      <div class="card left">
+        <h1>직원 로그인</h1>
+        <input type="text" id="login-id-input" placeholder="아이디">
+        <input type="password" id="login-pw-input" placeholder="비밀번호">
+        <div class="error-text" id="login-error"></div>
+        <button class="btn-green" onclick="tryLogin()">로그인</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 고객 번호표 발급 화면 (QR 목적지) ================= -->
+<div id="view-ticket" class="center-wrap" style="display:none;">
+  <div class="card" id="ticket-card">불러오는 중...</div>
+</div>
+
+<!-- ================= 창구명 입력 화면 ================= -->
+<div id="view-desk-setup" class="center-wrap" style="display:none;">
+  <div class="card left">
+    <h1>직원 이름 입력</h1>
+    <input type="text" id="desk-name-input" placeholder="예: 김민수">
+    <button class="btn-green" onclick="setDesk()">시작하기</button>
+  </div>
+</div>
+
+<!-- ================= 직원 처리 화면 ================= -->
+<div id="view-staff-panel" style="display:none;">
+  <div class="wrap">
+    <a class="link-small" onclick="logoutStaff()">← 대기현황 메인으로</a>
+
+    <div class="card-block" style="margin-top:14px;">
+      <div class="desk-badge" id="desk-badge"></div>
+      <h1>번호 처리</h1>
+      <input type="text" id="process-input" placeholder="고객 번호 입력" inputmode="numeric">
+      <button class="btn-green" onclick="processTicket()">처리</button>
+      <div class="error-text" id="process-error"></div>
+    </div>
+
+    <div class="card-block">
+      <h1>최근 처리 번호</h1>
+      <div class="stat-row" style="align-items:center;">
+        <span id="recent-number">없음</span>
+        <button class="btn-gray" style="margin:0;padding:6px 12px;font-size:12px;" onclick="checkRecent()">조회</button>
+      </div>
+      <div id="recent-cancel-wrap" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="card-block">
+      <h1>전체 창구 현황</h1>
+      <div id="desk-overview"></div>
+    </div>
+
+    <div class="card-block">
+      <h1>오늘의 현황</h1>
+      <div class="stat-row"><span>총 발급</span><span id="stat-issued">0</span></div>
+      <div class="stat-row"><span>처리 완료</span><span id="stat-completed">0</span></div>
+      <div class="stat-row"><span>대기 고객수</span><span id="stat-waiting">0</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY = 'branch-queue-state';
+const APP_KEY = 'uph8fvtp';
+const STAFF_ID = 'staff';
+const STAFF_PW = '1234';
+let deskId = null;
+let pollHandle = null;
+let lastRecentRecord = null;
+
+function todayStr(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+async function getState(){
+  let state = null;
+  try{
+    const res = await fetch(`https://keyvalue.immanuel.co/api/KeyVal/GetValue/${APP_KEY}/${STORAGE_KEY}`);
+    if(res.ok){
+      const text = await res.text();
+      state = JSON.parse(text);
+    }
+  }catch(e){ state = null; }
+  if(!state || state.date !== todayStr()){
+    state = { date: todayStr(), lastIssued: 0, completed: [], desks: {} };
+    try{ await saveState(state); }catch(e){}
+  }
+  if(!state.desks) state.desks = {};
+  return state;
+}
+async function saveState(state){
+  try{
+    const value = encodeURIComponent(JSON.stringify(state));
+    await fetch(`https://keyvalue.immanuel.co/api/KeyVal/UpdateValue/${APP_KEY}/${STORAGE_KEY}/${value}`, { method: 'POST' });
+  }catch(e){}
+}
+
+function hideAllViews(){
+  document.getElementById('view-public').style.display = 'none';
+  document.getElementById('view-ticket').style.display = 'none';
+  document.getElementById('view-desk-setup').style.display = 'none';
+  document.getElementById('view-staff-panel').style.display = 'none';
+  if(pollHandle){ clearInterval(pollHandle); pollHandle = null; }
+}
+
+// ================= 화면 라우팅 =================
+let staffLoggedIn = false;
+
+function decideView(){
+  hideAllViews();
+  const params = new URLSearchParams(window.location.search);
+
+  if(params.get('issue') === '1'){
+    document.getElementById('view-ticket').style.display = 'flex';
+    runTicketIssue(params);
+    return;
+  }
+  if(staffLoggedIn){
+    if(!deskId){
+      document.getElementById('view-desk-setup').style.display = 'flex';
+      return;
+    }
+    document.getElementById('view-staff-panel').style.display = 'block';
+    document.getElementById('desk-badge').textContent = '접속: ' + deskId;
+    refreshStaffPanel();
+    pollHandle = setInterval(refreshStaffPanel, 2000);
+    return;
+  }
+  document.getElementById('view-public').style.display = 'flex';
+  refreshPublic();
+  pollHandle = setInterval(refreshPublic, 2000);
+}
+
+// ================= 공개 대기현황 =================
+async function refreshPublic(){
+  const state = await getState();
+  const waiting = Math.max(0, state.lastIssued - state.completed.length);
+  document.getElementById('waiting-num').textContent = waiting;
+}
+function manualRefresh(){
+  const icon = document.getElementById('refresh-icon');
+  icon.classList.remove('spin');
+  void icon.offsetWidth;
+  icon.classList.add('spin');
+  refreshPublic();
+}
+function toggleStaffLogin(){
+  const el = document.getElementById('staff-login-inline');
+  el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+}
+
+// ================= 고객 번호표 발급 (QR 목적지, ?issue=1) =================
+async function runTicketIssue(params){
+  const existing = params.get('my');
+  let state = await getState();
+
+  if(existing && parseInt(existing,10) <= state.lastIssued){
+    renderTicket(existing);
+    return;
+  }
+  state.lastIssued += 1;
+  const myNum = state.lastIssued;
+  await saveState(state);
+
+  params.set('my', myNum);
+  window.history.replaceState({}, '', '?' + params.toString());
+  renderTicket(myNum);
+}
+function renderTicket(num){
+  document.getElementById('ticket-card').innerHTML = `
+    <div class="label">내 번호표</div>
+    <div class="number">${String(num).padStart(3,'0')}</div>
+    <div class="updated">이 화면을 기억해주세요.<br>대기 상황은 매장 내 화면에서 확인 가능합니다.</div>
+  `;
+}
+
+// ================= 로그인 =================
+function tryLogin(){
+  const id = document.getElementById('login-id-input').value.trim();
+  const pw = document.getElementById('login-pw-input').value.trim();
+  if(id === STAFF_ID && pw === STAFF_PW){
+    staffLoggedIn = true;
+    decideView();
+  } else {
+    document.getElementById('login-error').textContent = '아이디 또는 비밀번호가 올바르지 않습니다.';
+  }
+}
+async function logoutStaff(){
+  if(deskId){
+    try{
+      const state = await getState();
+      delete state.desks[deskId];
+      await saveState(state);
+    }catch(e){}
+  }
+  staffLoggedIn = false;
+  deskId = null;
+  decideView();
+}
+
+// ================= 창구명 입력 =================
+function setDesk(){
+  const val = document.getElementById('desk-name-input').value.trim();
+  if(!val) return;
+  deskId = val;
+  decideView();
+}
+
+// ================= 직원 처리 패널 =================
+async function processTicket(){
+  const val = document.getElementById('process-input').value.trim();
+  const errBox = document.getElementById('process-error');
+  errBox.textContent = '';
+  if(!val || isNaN(val)){
+    errBox.textContent = '번호를 입력해주세요.';
+    return;
+  }
+  const num = parseInt(val,10);
+  try{
+    const state = await getState();
+
+    if(num < 1 || num > state.lastIssued){
+      errBox.textContent = `발급되지 않은 번호입니다. (총 발급: ${state.lastIssued})`;
+      return;
+    }
+    if(state.completed.some(c => c.number === num)){
+      errBox.textContent = `${num}번은 이미 처리된 번호입니다.`;
+      return;
+    }
+    state.completed.push({ number: num, by: deskId, at: Date.now() });
+    state.desks[deskId] = { lastSeen: Date.now(), current: num };
+    await saveState(state);
+    document.getElementById('process-input').value = '';
+    refreshStaffPanel();
+  }catch(e){
+    errBox.textContent = '처리 중 오류가 발생했습니다. 다시 시도해주세요.';
+  }
+}
+
+function checkRecent(){
+  const wrap = document.getElementById('recent-cancel-wrap');
+  if(!lastRecentRecord){
+    wrap.innerHTML = '<span class="empty">처리한 내역이 없습니다.</span>';
+    return;
+  }
+  wrap.innerHTML = `<button class="btn-gray" onclick="cancelCompleted(${lastRecentRecord.idx})">${String(lastRecentRecord.number).padStart(3,'0')}번 취소</button>`;
+}
+
+async function cancelCompleted(idx){
+  const state = await getState();
+  if(idx >= 0 && idx < state.completed.length){
+    state.completed.splice(idx, 1);
+    await saveState(state);
+  }
+  document.getElementById('recent-cancel-wrap').innerHTML = '';
+  refreshStaffPanel();
+}
+
+async function refreshStaffPanel(){
+  const state = await getState();
+
+  // 하트비트: 접속중임을 알림 (기존 current 번호는 유지)
+  const existingEntry = state.desks[deskId];
+  state.desks[deskId] = { lastSeen: Date.now(), current: existingEntry ? existingEntry.current : null };
+  await saveState(state);
+
+  const myRecords = state.completed
+    .map((rec, idx) => ({ ...rec, idx }))
+    .filter(r => r.by === deskId)
+    .sort((a,b) => b.at - a.at);
+
+  const newRecent = myRecords.length > 0 ? myRecords[0] : null;
+  const changed = !lastRecentRecord || !newRecent || lastRecentRecord.idx !== newRecent.idx || lastRecentRecord.number !== newRecent.number;
+  lastRecentRecord = newRecent;
+
+  document.getElementById('recent-number').textContent = newRecent ? String(newRecent.number).padStart(3,'0') + '번' : '없음';
+  if(changed){
+    document.getElementById('recent-cancel-wrap').innerHTML = '';
+  }
+
+  // 전체 창구 현황 (8초 이내 신호 있는 창구만 접속중으로 표시)
+  const ONLINE_THRESHOLD = 8000;
+  const now = Date.now();
+  const activeDesks = Object.keys(state.desks)
+    .filter(k => now - state.desks[k].lastSeen < ONLINE_THRESHOLD)
+    .sort();
+
+  const overviewEl = document.getElementById('desk-overview');
+  if(activeDesks.length === 0){
+    overviewEl.innerHTML = '<span class="empty">접속중인 창구가 없습니다.</span>';
+  } else {
+    overviewEl.innerHTML = activeDesks.map(k => {
+      const cur = state.desks[k].current;
+      const label = (k === deskId) ? `${k} (나)` : k;
+      return `
+        <div class="stat-row">
+          <span>${label}</span>
+          <span>${cur !== null && cur !== undefined ? String(cur).padStart(3,'0')+'번 처리' : '대기중'}</span>
+        </div>`;
+    }).join('');
+  }
+
+  document.getElementById('stat-issued').textContent = state.lastIssued;
+  document.getElementById('stat-completed').textContent = state.completed.length;
+  document.getElementById('stat-waiting').textContent = Math.max(0, state.lastIssued - state.completed.length);
+}
+
+decideView();
+</script>
+</body>
+</html>
